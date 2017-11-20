@@ -1,0 +1,8 @@
+{
+    "collectionMethods": [],
+	"resourceFields": {
+		"services": {
+			"type": "map[serviceBinding]"
+		}
+	}
+}

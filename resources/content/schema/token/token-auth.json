@@ -1,0 +1,19 @@
+{
+    "authorize" : {
+        ".*" : "",
+        "schema.*": "r",
+        "token": "crd",
+        "token.accountId": "r",
+        "token.code": "cr",
+        "token.defaultProject": "r",
+        "token.enabled": "r",
+        "token.identities": "r",
+        "token.jwt": "r",
+        "token.security": "r",
+        "token.user": "r",
+        "token.userIdentity": "r",
+        "token.authProvider": "r",
+        "token.redirectUrl": "r",
+        "token.userType": "r"
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "collectionMethods": [],
+	"resourceFields": {
+		"labels": {
+			"type": "map[string]"
+		},
+		"ports": {
+			"type": "array[string]"
+		}
+	}
+}

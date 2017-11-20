@@ -1,0 +1,5 @@
+{
+    "kind" : "user",
+    "orchestration": "cattle",
+    "version": "2"
+}

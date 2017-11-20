@@ -1,0 +1,240 @@
+#!/bin/bash
+set -x
+set -e
+
+cd $(dirname $0)
+
+# An environment is a db and test plan
+declare -A ENVIRONMENTS=${ENVIRONMENTS:-( [h2]=lite [mysql]=full [pgsql]=full )}
+declare -A RESULTS=( [h2]=0 [mysql]=0 [pgsql]=0 )
+export RUNTIME_DIR_CLEAN=true
+export CATTLE_LOGBACK_ROOT_LEVEL=error
+
+echo Launching Docker
+if grep -q overlay /proc/filesystems; then
+    GRAPH=overlay
+else
+    GRAPH=aufs
+fi
+docker daemon -D -s $GRAPH >/tmp/docker.log 2>&1 &
+for i in {1..10}; do
+    if docker info >/dev/null 2>&1; then
+        break
+    else
+        sleep 1
+    fi
+done
+docker info
+
+echo_dot()
+{
+    trap "exit 0" TERM
+    echo -n " "
+    while true; do
+        echo -n .
+        sleep 1
+    done
+}
+
+run()
+{
+    echo -n Running "$@"
+    echo_dot 2>/dev/null &
+    DOT_PID=$!
+
+    "$@" > /tmp/${1}.log || {
+        echo "$@" failed
+        cat /tmp/${1}.log
+        echo "$@" failed
+        exit 1
+    }
+
+    kill $DOT_PID
+    echo
+}
+
+gist()
+{
+    local result=0
+    printf "\n\e[1;35mRESULTS\e[0m\n"
+    printf "\e[1;32m%-10s %-10s Status\e[0m\n" "Database" "Plan"
+
+    for db in "${!ENVIRONMENTS[@]}"
+    do
+        if [ ${RESULTS[${db}]} -ge 1 ]; then
+            printf "%-10s %-10s \e[1;31mFAILED\e[0m\n" $db ${ENVIRONMENTS[$db]}
+            result=1
+        else
+            printf "%-10s %-10s \e[1;32mSUCCESS\e[0m\n" $db ${ENVIRONMENTS[$db]}
+        fi
+    done
+
+    exit $result
+}
+
+install_mysql_cmd_aliases()
+{
+    cat >/usr/local/bin/mysql <<EOF
+[ -t 0 ] && tty=-it
+docker run \$tty --rm -e MYSQL_HOST -e MYSQL_TCP_PORT --net=host mysql:$MYSQL_VERSION mysql -P $MYSQL_TCP_PORT "\$@"
+EOF
+    chmod +x /usr/local/bin/mysql
+
+    cat >/usr/local/bin/mysqldump <<EOF
+[ -t 0 ] && tty=-it
+docker run \$tty --rm -e MYSQL_HOST -e MYSQL_TCP_PORT --net=host mysql:$MYSQL_VERSION mysqldump -h $MYSQL_HOST -P MYSQL_TCP_PORT "\$@"
+EOF
+    chmod +x /usr/local/bin/mysqldump
+}
+
+install_pgsql_cmd_aliases()
+{
+    cat >/usr/local/bin/psql <<EOF
+[ -t 0 ] && tty=-it
+docker run \$tty --rm -e PGDATABASE -e PGHOST -e PGUSER -e PGPASSWORD  --net=host postgres:$PGSQL_VERSION psql "\$@"
+EOF
+    chmod +x /usr/local/bin/psql
+
+    cat >/usr/local/bin/pg_dump <<EOF
+[ -t 0 ] && tty=-it
+docker run \$tty --rm -e PGDATABASE -e PGHOST -e PGUSER -e PGPASSWORD --net=host postgres:$PGSQL_VERSION pg_dump "\$@"
+EOF
+    chmod +x /usr/local/bin/pg_dump
+}
+
+set_up_agent() {
+    # Wait for completion now to ensure that images are pulled
+    ./test-warm
+
+    AGENT_IMAGE=$(grep bootstrap.required.image ../resources/content/cattle-global.properties | cut -f2 -d=)
+    CONTAINER_IP=$(/sbin/ip -o -4 addr list eth0 | awk '{print $4}' | cut -d/ -f1)
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ${AGENT_IMAGE} http://${CONTAINER_IP}:8081 >/tmp/register.log &
+
+    ./wait-for-hosts
+}
+
+tear_down() {
+    echo Shutting down agent...
+    set +e
+    docker stop $(docker ps -q --filter=name=r) &>> /dev/null
+    docker rm -fv $(docker ps -a -q --filter=name=r) &>> /dev/null
+    set -e
+
+    echo Shutting down server...
+    pkill java
+}
+
+test_failed()
+{
+    cat /tmp/run.log
+    ((RESULTS[$1]++))
+}
+
+# Background to start the Docker pulls
+./test-warm >/dev/null &
+
+CI=true MAVEN_ARGS='-B -q' run ./build
+
+threads=$(($(nproc) + 1))
+if [ $threads -gt 8 ]; then
+    threads=8
+fi
+
+for DB in "${!ENVIRONMENTS[@]}"
+do
+
+    echo -e "\n\e[1;35mTESTING $DB\e[0m\n"
+
+    export RUNTIME_DIR=$(pwd)/../runtime/ci-$DB/
+
+    # Bootstrap Database
+    set +e
+    docker stop ci-$DB &>> /dev/null
+    docker rm ci-$DB &>> /dev/null
+    set -e
+
+    case $DB in
+
+        h2 )
+            ;;
+
+        mysql )
+
+            export CATTLE_DB_CATTLE_DATABASE=mysql
+            : ${CATTLE_DB_CATTLE_MYSQL_PORT:=$MYSQL_TCP_PORT}
+            : ${CATTLE_DB_CATTLE_MYSQL_HOST:=$MYSQL_HOST}
+            export CATTLE_DB_CATTLE_MYSQL_HOST
+            export CATTLE_DB_CATTLE_MYSQL_PORT
+            docker run --net=host --name ci-$DB \
+                -e MYSQL_DATABASE=cattle \
+                -e MYSQL_USER=cattle \
+                -e MYSQL_PASSWORD=cattle \
+                -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
+                -v $(pwd)/../resources/content/db/mysql/mysql-dump.sql:/docker-entrypoint-initdb.d/mysql-dump.sql \
+                -d mysql:$MYSQL_VERSION \
+                --innodb-flush-log-at-trx-commit=0 \
+                --max-connections=1000 \
+                --port=$MYSQL_TCP_PORT \
+                --sql-mode=ONLY_FULL_GROUP_BY
+            install_mysql_cmd_aliases
+            ;;
+
+        pgsql )
+
+            export CATTLE_DB_CATTLE_DATABASE=postgres
+            docker run --net=host --name ci-$DB \
+                -e POSTGRES_USER=$PGUSER \
+                -e POSTGRES_PASSWORD=$PGPASSWORD \
+                -d postgres:$PGSQL_VERSION \
+                -c max_connections=1000 \
+                -c fsync=off
+            install_pgsql_cmd_aliases
+            ;;
+
+        * )
+
+            echo Unknown database specified.
+            exit 1
+
+    esac
+
+    run ./run --background
+
+    # Test Environment
+    case ${ENVIRONMENTS[$DB]} in
+
+        debug )
+
+            set_up_agent
+            set +e
+            DEBUG=true ./test -- -n $threads -v $@ || test_failed $DB
+            set -e
+            ;;
+
+        full )
+
+            set_up_agent
+            set +e
+            ./test -e py27 -- -m nonparallel && ./test -- -m "'not nonparallel'" -n $threads -v || test_failed $DB
+            set -e
+            ;;
+
+        lite )
+
+            set +e
+            ./test -e py27 -- core/test_virtual_machine.py core/test_container.py || test_failed $DB
+            set -e
+            ;;
+
+        * )
+
+            echo Unknown test plan specified.
+            exit 1
+
+    esac
+
+    tear_down
+
+done
+
+gist
