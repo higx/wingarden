@@ -1,9 +1,8 @@
 #!/bin/bash
 set -e
-set -x 
+set -x
 
 cd $(dirname $0)/..
-ln -s /usr/src/cattle/m2 /root/.m2
 
 selectjar()
 {
