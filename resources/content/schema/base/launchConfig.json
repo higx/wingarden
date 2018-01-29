@@ -30,10 +30,6 @@
             "options" : ["container", "virtualMachine"],
             "create" : true,
             "default": "container"
-        },
-        "drainTimeoutMs" : {
-            "type" : "int",
-            "default": 0
         }
     }
 }
