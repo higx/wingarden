@@ -1,4 +1,4 @@
-FROM azul/zulu-openjdk:8u72
+FROM azul/zulu-openjdk
 
 ENV DAPPER_ENV API_VERSION ENVIRONMENTS
 ENV DAPPER_RUN_ARGS --privileged
