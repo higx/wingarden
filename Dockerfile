@@ -20,11 +20,14 @@ ENV PGDATABASE cattle
 
 # Install Python and packages
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python-pip iptables xz-utils git curl
+    apt-get install -y --no-install-recommends python-pip iptables xz-utils git curl python-setuptools
 
 # Hack to work around overlay issue
 RUN pip uninstall -y py >/dev/null >/dev/null 2>&1 || true && \
-    pip install --upgrade pip==6.0.3 tox==1.8.1 virtualenv==12.0.4
+    pip install --upgrade pip==9.0.1 tox==1.8.1 virtualenv==12.0.4 && \
+    pip install setuptools --upgrade
+
+RUN pip install wheel
 
 # Build Tools
 ENV BUILD_TOOLS_VERSION 0.3.1
