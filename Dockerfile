@@ -24,7 +24,7 @@ RUN apt-get update && \
 
 # Hack to work around overlay issue
 RUN pip uninstall -y py >/dev/null >/dev/null 2>&1 || true && \
-    pip install --upgrade pip==9.0.1 tox==1.8.1 virtualenv==12.0.4 && \
+    pip install --upgrade pip tox==1.8.1 virtualenv==12.0.4 && \
     pip install setuptools --upgrade
 
 RUN pip install wheel
@@ -38,7 +38,9 @@ RUN mkdir /tmp/build-tools && \
     rm -rf /tmp/build-tools
 
 # Cache Maven stuff
-RUN cp /usr/lib/jvm/zulu-8-amd64/jre/lib/security/US_export_policy.jar /usr/lib/jvm/zulu-8-amd64/jre/lib/security/local_policy.jar
+RUN cp /usr/lib/jvm/zulu-8-amd64/jre/lib/security/policy/unlimited/US_export_policy.jar /usr/lib/jvm/zulu-8-amd64/jre/lib/security/local_policy.jar && \
+    cp /usr/lib/jvm/zulu-8-amd64/jre/lib/security/policy/unlimited/US_export_policy.jar /usr/lib/jvm/zulu-8-amd64/jre/lib/security/US_export_policy.jar
+#RUN cp /usr/lib/jvm/zulu-8-amd64/jre/lib/security/US_export_policy.jar /usr/lib/jvm/zulu-8-amd64/jre/lib/security/local_policy.jar
 RUN cd /tmp && \
     git clone https://github.com/ibuildthecloud/cattle.git && \
     cd cattle && \
